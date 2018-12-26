@@ -1,0 +1,169 @@
+---
+title: "Modelo para estudiar el riesgo de pobreza"
+author: "Daniel Tomé Gordo"
+date: "9 de diciembre de 2018"
+output:
+  pdf_document: default
+  html_notebook: default
+  html_document:
+    df_print: paged
+subtitle: Máster en Data Science para Finanzas CUNEF
+---
+
+# Resumen ejecutivo
+
+En este informe se intentará crear un modelo logístico que ayude a la clasificación de las familias, en los niveles fijados como los umbrales del pobreza, que componen la base de datos con la que se trabaja. Para la realización del modelo, primeramente se hará una selección de las variables que con un mejor carácter clasificador. Esta selección se hará por distintos métodos.
+Para la creacion del modelo, se dividirá la información de las casi 500 familias en dos grupos: un grupo se usará para entrenar el modelo, y el otro se usará para predecir y ver el nivel de acierto que tiene el modelo creado. Como medida de bondad del modelo se usará la matriz de confusión resultante, que arroja un nivel de acierto del 78%
+
+# Introducción
+
+En el presente informe se intentará ver qué variables son las que pueden llegar a explicar el reconocimiento de un hogar como un hogar en riesgo de pobreza. Según las organizaciones especializadas en esta clasificación, se considera que un hogar está en riesgo de pobreza si la renta conseguida por las familias se sitúa por debajo del 60% de la mediana de los ingresos anuales de las familias.
+Para dicho estudio se presenta una base de datos de 477 familias que incluye información sobre 18 variables que se esperan que puedan explicar la caracterización de las familias en riesgo de pobreza. Sin embargo, existen algunas variables que por diversos motivos no podrán ser usadas en el estudio:
+
+```{r}
+library(readxl)
+data <- read_excel("Datos/RiesgoPobreza.xlsx", 
+                   sheet = "Hoja1")
+data <- data.frame(data[,-1], row.names = data$NHOGAR)
+names(data) <- c("Ayuda por familia en año pasado", "Renta percibida por menores de 16", "Vacaciones fuera (> 1semana)", "Gastos imprevistos", "Televisión en color", "Ordenador", "Capacidad para llegar a fin de mes", "Propiedad de la casa", "Nº miembros de hogar", "Renta disponible año anterior", "Riesgo de pobreza", "Región", "Edad de la persona más mayor del hogar", "Horas de trabajo semanal", "Nº miembros mayores de 16", "Sexo del mayor", "Situación laboral")
+str(data)
+```
+
+
+- Existe un identificador para cada familia que por motivos obvios no podrá ser usada para el estudio, sino que se colocará como identificador de la fila
+- En segundo lugar la variable explicativa será la definida en el _dataset_ como *Riesgo de pobreza*
+- La variable denominada *Renta disponible en el año anterior* no puede ser usada para el estudio debido a la alta relación con la variable explicativa. Ya que esta, el riesgo de pobreza, se calcula como una división de la renta entre el número de miembros de la familia.
+- Las variables *Televisión en color* y *Ordenador* que indican la propiedad o no del elemento, cambiarán sus valores para que toda respuesta _No_ se agrupe. En ambas variables existe la posibilidad de marcar No por motivos económicos o por otras razones. Por otro lado, la variable *Televisión en color*  no podrá ser usada pues todos los miembros de la muestra, ya poseen televisión en color. También, teniendo en cuenta que la televisión en color llegó a España hace ya casi 50 años, era muy claro que no iba a poder ser usada.
+- En cuanto a las demás variables, aquellas que son factores deben ser renombradas como esto, ya que en la carga se han considerado como numéricas.
+
+```{r message=FALSE}
+library(dplyr)
+data$`Vacaciones fuera (> 1semana)` <- as.factor(data$`Vacaciones fuera (> 1semana)`)
+data$`Gastos imprevistos` <- as.factor(data$`Gastos imprevistos`)
+data$Ordenador <- if_else(data$Ordenador != 1, 2, 1)
+data$Ordenador <- as.factor(data$Ordenador)
+data$`Capacidad para llegar a fin de mes` <- as.factor(data$`Capacidad para llegar a fin de mes`)
+data$`Propiedad de la casa` <- as.factor(data$`Propiedad de la casa`)
+data$`Riesgo de pobreza` <- factor(data$`Riesgo de pobreza`, levels = c(0,1), labels = c("Normal", "En riesgo de pobreza"))
+data$`Sexo del mayor` <- as.factor(data$`Sexo del mayor`)
+data$`Situación laboral` <- as.factor(data$`Situación laboral`)
+
+str(data)
+
+data.def <- data[,-c(10)]
+```
+
+Una cosa muy importante a comprobar es el "balanceo" de la muestra
+
+```{r}
+summary(data.def$`Riesgo de pobreza`)
+```
+
+# Creación del modelo
+
+El primer paso para la creación del modelo será distribuir la muestra en dos partes, una parte para entrenar el modelo, que constará de un 70% de la muestra; y la otra parte restante será para testear la bondad del modelo y ver su precisión. Para asegurar que la aleatoriedad en la elección de ambas muestras, sea siempre la misma, independientemente de la prueba, se usará una semilla. Además se comprobará si el balanceo anterior se sigue guardando en la muestra _train_ y la _test_
+
+```{r}
+set.seed(888)
+muestra <- sample(x = nrow(data.def), size = nrow(data.def)*.7)
+data.train <- data.def[muestra,]
+data.test <- data.def[-muestra,]
+summary(data.train$`Riesgo de pobreza`)
+summary(data.test$`Riesgo de pobreza`)
+```
+
+Para hallar las variables que mejor explican la variable dependiente, *Riesgo de Pobreza*, se utilizarán diversos métodos de selección que irán quitando o añadiendo variables explicativas.
+
+```{r include=FALSE}
+library(MASS)
+modelo.entero <- glm(formula = `Riesgo de pobreza` ~. , data = data.train, family = "binomial")
+modelo.nulo <- glm(formula = `Riesgo de pobreza` ~1, data = data.train, family = "binomial")
+
+m1 <- stepAIC(modelo.nulo, scope = list(lower = modelo.nulo, upper = modelo.entero), direction = "forward")
+m2 <- stepAIC(modelo.entero, direction = "backward")
+m3 <- stepAIC(modelo.entero, direction = "both")
+```
+
+```{r}
+AIC(m1)
+AIC(m2)
+AIC(m3)
+m1$call
+```
+
+Como criterio de selección del modelo a usar se usará el **AIC**. Como se observa todos los métodos usados dan el mismo AIC, por lo tanto será indiferente el método a usar. Estos métodos dan como mejores variables para predecir (y clasificar) las siguientes: _Ayuda por familia en año pasado_, _Vacaciones fuera (> 1 semana)_, _Capacidad para llegar a fin de mes_, _Nº de miembros del hogar_, _Sexo del mayor_ y _Situación laboral_.
+
+```{r}
+modelo <- glm(formula = `Riesgo de pobreza` ~ `Ayuda por familia en año pasado` + `Vacaciones fuera (> 1semana)` + `Capacidad para llegar a fin de mes` + `Nº miembros de hogar` + `Sexo del mayor` + `Situación laboral`, family = "binomial", data = data.train)
+```
+
+En el resumen del modelo se observa la significatividad de las variables que, a pesar de ser las mejores clasificadoras de las 17 originales, no son todas significativas para la explicación del _Riesgo de pobreza_. Al ser la mayoría de las variables elegidas de tipo factor, hay una de las categorías que debe ser eliminada en el modelo para evitar la multicolinealidad
+```{r}
+summary(modelo)
+```
+
+```{r}
+exp(coef(modelo))
+```
+
+Siguiendo con la explicación del modelo, hay que interpretar los coeficientes. En este caso, al ser un modelo logístico la interpretación es ligeramente distinta. Los coeficientes se miden como la ventaja relativa que se gana o pierde (dependiendo del signo del coeficiente) al aumentar una unidad de la variable. Esto funciona en las variables numéricas, como en este caso el número de miembros del hogar o la ayuda percibida por el hogar. Por ejemplo, el tener un miembro más en el hogar aumenta la probabilidad de estar en riesgo de pobreza un 86%; por el lado de la ayuda, una suma de 1000€ más de esta da un 4,5% más de probabilidad de estar en riesgo de pobreza.
+En cuanto a las variables de tipo factor, la interpretación es distinta. Al tener que crear para cada categoría una variable _dummie_, es decir, una variable ficticia que coge el valor 0 y 1 dependiendo de si cumple esa condición o no; la interpretación será la ventaja de tener o no esa condición. Por ejemplo, en el modelo la variable más significativa, _Situación laboral 5_ que es la de estar parado, dice que, estar en esta situación aumenta más de un 900% la posibilidad de caer en riesgo de pobreza; frente a la categoría omitida que es la del asalariado a tiempo completo.
+
+```{r}
+anova(modelo, test = "Chisq")
+```
+
+Por último, el test ANOVA muestra como la variable _Vacaciones fuera_, que representa si el hogar puede permitirse tener vacaciones fuera de casa, es la que tiene un mayor peso dentro del modelo, seguido por la _Situación Laboral_.
+ 
+# Predicción y clasificación de los individuos
+
+El modelo anterior al ser logístico dará como solución un número entre 0 y 1, no si un individuo estará o no considerado como una familia en riesgo de pobreza. Por lo tanto, habrá que determinar el valor a partir del cual estará en riesgo de pobreza. Para ello, se representará primero para ver "visualmente" el valor, posteriormente se realizará mediante una función que buscará el mejor punto de corte para ello.
+
+```{r}
+hist(predict(object = modelo, type = "response"))
+```
+
+En la observación, se puede determinar que el 0.5 podría ser un buen punto de corte. De hecho se realiza una matriz de confusión para ver el nivel de acierto en la muestra de test.
+El nivel de acierto se medirá como la suma de la diagonal principal de la matriz entre el número total de observaciones. Este nivel asciende a 78,47%
+
+```{r}
+probabilidad <- predict(object = modelo, newdata = data.test, type = "response")
+
+prediccion <- factor(probabilidad > .5, levels = c(FALSE, TRUE), labels = c("Normal", "En riesgo de pobreza"))
+
+matriz.confusion <- table(prediccion, data.test$`Riesgo de pobreza`, dnn = c("Predicción", "Realidad"))
+
+matriz.confusion
+```
+Aún así para ver si el corte elegido es el óptimo, se decide probar todos los distintos cortes, en intervalos de 0,01, pudiendo comprobar cuál es el mejor corte para este caso
+```{r}
+tabla.optima <- data.frame(cbind(seq(from = 0.01, to = 0.99, by = 0.01), NA))
+names(tabla.optima) <- c("Corte", "Aciertos")
+matrices <- function(corte) {
+  probabilidad <- predict(object = modelo, newdata = data.test, type = "response")
+  predicho <- factor(probabilidad > corte, levels = c(FALSE, TRUE), labels = c("Normal", "En riesgo de pobreza"))
+  matriz.conf <- table(predicho, data.test$`Riesgo de pobreza`, dnn = c("Predicción", "Realidad"))
+  return(matriz.conf)
+}
+
+for (i in 1:nrow(tabla.optima)) {
+  tabla.optima[i,2] <- sum(diag(matrices(tabla.optima[i,1]))) 
+}
+tabla.optima[30:45,]
+```
+A pesar de que la observación decía que el 0,5 podría ser un buen corte, la función creada para hallarlo, ha determinado dos puntos donde la suma de la diagonal es la máxima, 0.35 y 0.39. Para decidir cuál de las dos es mejor se mostrarán ambas matrices buscando que se minimicen los falsos negativos, aquellos que el modelo dice que no están en riesgo de pobreza y en la realidad sí lo están. Ya que el corte en 0.35 da un error por ese lado más pequeño (10 vs. 11) el corte óptimo elegido será el 0.35
+
+```{r}
+matrices(0.35)
+matrices(0.39)
+```
+
+# Conclusiones
+
+Tras haber desarrollado y creado el modelo logístico que permita clasificar las distintas familias que componen la muestra, se puede decir que el modelo creado ha resultado bastante satisfactorio. Se ha conseguido realizar un modelo que contiene únicamente 6 variables de las 18 iniciales, y que consigue tener un acierto cercano al 80%. Una cifra nada despreciable. Además, se ha cumplido, la disminución al mínimo de los llamados falsos negativos, aquellos que el modelo dice que estñan fuera del riesgo de pobreza, pero en la realidad sí que lo están. Estos se reducen a algo menos de un 10% de las observaciones del modelo (en la muestra test). Aún así, esta cifra es algo superior a lo que se pretendería.
+
+En líneas generales, el modelo consigue clasificar correctamente a un 80% de las familias, dejando a otro 20% mal clasficadas. Sin embargo, estos errores se dividen en dos, más o menos, al 10% cada uno. Dependiendo de la perspectiva elegida, unos serán más importantes que los otros. Por ejemplo, para un Gobierno debería ser más importante el error que se buscaba minimizar en este caso, fijándose en el punto de vista social. Por el otro lado, si se fijase en un punto de vista más económico, los falsos positivos serían peores pues significarían una salida de fondos sin necesidad de ello.
+
+# Referencias
+
+- https://www.abc.es/play/television/noticias/abci-cuando-color-llego-televisiones-europeas-201707060838_noticia.html
