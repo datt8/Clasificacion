@@ -19,17 +19,19 @@ data$`Gastos imprevistos` <- factor(data$`Gastos imprevistos`, levels = c(1,2),
                                     labels = c("Sí", "No"))
 data$Ordenador <- if_else(data$Ordenador != 1, 2, 1)
 data$Ordenador <- factor(data$Ordenador, levels = c(1,2), labels = c("Sí", "No"))
-data$`Capacidad para llegar a fin de mes` <- factor(data$`Capacidad para llegar a fin de mes`, 
+data$`Capacidad para llegar a fin de mes` <- factor(data$`Capacidad para llegar a fin de mes`,
                                                     levels = c(1, 2, 3, 4, 5, 6), 
-                                                    labels = c("Con mucha dificultad", "Con dificultad", "Con cierta dificultad", "Con cierta facilidad", "Con facilidad", "Con mucha facilidad"))
+                                                    labels = c("Muy díficil", "Díficil", "Poco díficil", "Poco fácil", "Fácil", "Muy fácil"))
 data$`Propiedad de la casa` <- factor(data$`Propiedad de la casa`, levels = c(1, 2, 3, 4, 5), 
-                                      labels = c("Propia sin hipoteca", "Propia con hipoteca", "Alquiler a precio mercado", "Alquiler por debajo de mercado", "Cesión gratuita"))
+                                      labels = c("Propia", "Propia con hipoteca", "Alquiler a precio mercado", "Alquiler por debajo de mercado", "Cesión gratuita"))
 data$`Riesgo de pobreza` <- factor(data$`Riesgo de pobreza`, levels = c(0,1), 
                                    labels = c("Normal", "En riesgo de pobreza"))
 data$`Sexo del mayor` <- factor(data$`Sexo del mayor`, levels = c(0, 1), 
                                 labels = c("Mujer", "Hombre"))
 data$`Situación laboral` <- factor(data$`Situación laboral`, levels = seq(1, 11, 1), 
-                                   labels = c("Asalariado T. Completo", "Asalariado T. Parcial", "Cuenta propia T. Completo", "Cuenta propia T. Parcial", "Parado", "Estudiante", "Jubilado", "Incapacitado", "Militar", "Hogar", "Otros"))
+                                   labels = c("Asalariado TC", "Asalariado TP", "Cuenta propia TC", 
+                                              "Cuenta propia TP", "Parado", "Estudiante", "Jubilado", 
+                                              "Incapacitado", "Militar", "Hogar", "Otros"))
 
 data.def <- data[,-c(5, 10)] # Se elimina la televisión en color y la renta del año anterior (muy relacionada)
 
@@ -91,7 +93,7 @@ plotcp(arbol1) # Otra afirmación más de que el parámetro elegido debe ser el 
 summary(arbol1) # Resumen completo del árbol e importancia de las variables.
 
 arbol1.podado <- prune(arbol1, cp = arbol1$cptable[2]) # Se poda el arbol con el parametro de complejidad elegido
-prp(arbol1.podado, type = 4, extra = 108, fallen.leaves = TRUE, main = "Árbol de Decisión 1") # Se grafica el árbol
+rpart.plot(arbol1.podado, type = 4, extra = 108, fallen.leaves = TRUE, main = "Árbol de Decisión 1", box.palette = "BuOr") # Se grafica el árbol
 # La interpretación es la que sigue: existe un 74 % de posibilidades de que siendo parado, incapacitado o asalariado a tiempo parcial
 # la familia se encuentre en riesgo de pobreza. Si no pertenece el mayor del hogar a eso, la probabilidad baja al 19%
 # Se consigue un 78 % de acierto en entrenamiento (nada malo si se compara con el logístico)
@@ -122,7 +124,7 @@ plotcp(arbol2) # Otra afirmación más de que el parámetro elegido debe ser el 
 summary(arbol2) # Resumen completo del árbol e importancia de las variables.
 
 arbol2.podado <- prune(arbol2, cp = arbol2$cptable[2]) # Se poda con el parámetro elegido
-prp(arbol2.podado, type = 4, extra = 108, fallen.leaves = TRUE, main = "Árbol de Decisión 2") # Se grafica
+rpart.plot(arbol2.podado, type = 4, extra = 108, fallen.leaves = TRUE, main = "Árbol de Decisión 2", box.palette = "BuOr") # Se grafica
 # Existe un 66% de que siendo parada, empleado en hogar, incapacitado o asalariado a tiempo parcial de estar en riesgo de pobreza. Si está en otra categoría, 17%.
 # El nivel de acierto en entrenamiento es similar al logístico y al anterior (76%)
 
@@ -143,3 +145,31 @@ arbol2.matriz.conf.complex
 # Al contrario que en el anterior, el problema se arregla por el otro lado (los no pobres), por lo tanto no merece la pena el aumento
 
 # Existe inestabilidad en los árboles debido a la diferencia de tratamiento de los trabajadores en hogar.
+
+## Arboles condicionados
+
+### Árbol 1
+
+library(party)
+arbol1.cond <- ctree(`Riesgo de pobreza` ~ `Situación laboral` + `Capacidad para llegar a fin de mes` + 
+                       `Ayuda por familia en año pasado` + `Nº miembros de hogar` + `Gastos imprevistos` + 
+                       `Propiedad de la casa`, data = data.train1)
+
+plot(arbol1.cond, main = "Árbol de inferencia condicional 1") # A pesar de la pureza de muchos nodos terminales, el acierto no es significativamente alto.
+
+arbol1.cond.pred <- predict(arbol1.cond, data.test1, type = "response")
+arbol1.cond.pred.matriz.conf <- table(data.test1$`Riesgo de pobreza`, arbol1.cond.pred, dnn = c("Real", "Predicho"))
+arbol1.cond.pred.matriz.conf # El resultado es muy similar al de los árboles sin condiciones
+
+### Árbol 2
+
+arbol2.cond <- ctree(`Riesgo de pobreza` ~ `Situación laboral` + 
+                      `Capacidad para llegar a fin de mes` + `Ayuda por familia en año pasado` + 
+                       `Nº miembros de hogar` + `Gastos imprevistos` + `Propiedad de la casa`, 
+                     data = data.train2)
+
+plot(arbol2.cond, main = "Árbol de inferencia condicional 2")
+
+arbol2.cond.pred <- predict(arbol2.cond, data.test2, type = "response")
+arbol2.cond.pred.matriz.conf <- table(data.test2$`Riesgo de pobreza`, arbol2.cond.pred, dnn = c("Real", "Predicho"))
+arbol2.cond.pred.matriz.conf # Los fuera de pobreza los predice muy bien, pero los que están en riesgo de pobreza no (<60%)
